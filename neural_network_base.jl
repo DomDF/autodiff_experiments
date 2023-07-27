@@ -64,4 +64,4 @@ a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, 2))   # Inputs
 y = 2 .+ 3 .* a₁[:,1] .+ 5 .* a₁[:,2]                           # Targets
 
 # Training process
-train(nn, X, y, 1000, 0.01)
+train(nn, a₁, y)
