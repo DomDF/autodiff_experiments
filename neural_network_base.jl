@@ -1,5 +1,5 @@
 using LinearAlgebra, ForwardDiff, ReverseDiff, Zygote   # for backpropagation
-using Random                        # for randomly initialising the weights and biases
+using Random                                            # for randomly initialising the weights and biases
 
 # Define the sigmoid activation function
 function sigmoid_activation(x)
