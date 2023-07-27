@@ -1,4 +1,4 @@
-using LinearAlgebra, ForwardDiff    # for backpropagation
+using LinearAlgebra, ForwardDiff, ReverseDiff, Zygote   # for backpropagation
 using Random                        # for randomly initialising the weights and biases
 
 # Define the sigmoid activation function
@@ -7,7 +7,7 @@ function sigmoid_activation(x)
 end
 
 function relu_activation(x)
-    return max(0, x)
+    return max(zero(T), x)
 end
 
 # Define the structure of our neural network
@@ -15,10 +15,10 @@ mutable struct neural_network
     input_dim::Int
     hidden_dim::Int
     output_dim::Int
-    W₁::Array{Float64,2}
-    b₁::Array{Float64,1}
-    W₂::Array{Float64,2}
-    b₂::Array{Float64,1}
+    W₁::Array{Float64, 2}
+    b₁::Array{Float64, 1}
+    W₂::Array{Float64, 2}
+    b₂::Array{Float64, 1}
 end
 
 function initialise_network(input_size::Int, hidden_size::Int, output_size::Int; prng = MersenneTwister(240819))
@@ -27,37 +27,53 @@ function initialise_network(input_size::Int, hidden_size::Int, output_size::Int;
                           randn(prng, (hidden_size, output_size)), zeros(output_size))
 end
 
-# Define the forward propagation process
+# Define forward propagation process
 function forward_prop(nn::neural_network, a₁::Array{Float64,2})
-    a₂ = b₁ .+ a₁ .* nn.W₁ |> 
-        z -> sigmoid_activation.(z)
-    ŷ = b₂ .+ a₂ .* nn.W₂ |>
-        z -> sigmoid_activation.(z)
+    a₂ = [reshape(a₁[i, :], (1, nn.input_dim)) * nn.W₁ .+ reshape(nn.b₁, (1, nn.hidden_dim)) for i ∈ 1:size(a₁)[1]] |> 
+        z -> [sigmoid_activation.(z[i]) for i ∈ 1:length(z)]
+    ŷ = [a₂[i] * nn.W₂ .+ reshape(nn.b₂, (1, nn.output_dim)) for i ∈ 1:size(a₂)[1]] |>
+        z -> [sigmoid_activation.(z[i])[1] for i ∈ 1:length(z)]
     return a₁, a₂, ŷ
 end
 
-# Define the loss function
-function mse_loss(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64,2})
-    ŷ, _ = forward(nn, X)
-    return sum((y .- yHat).^2) / length(y)
+# Using a mse loss function
+function mse_loss(nn::neural_network, a₁::Array{Float64, 2}, y::Array{Float64})
+    _, _, ŷ = forward_prop(nn, a₁)
+    return sum((y .- ŷ).^2) / length(y)
 end
 
-# Define the training process
-function train(nn::SimpleNN, X::Array{Float64,2}, y::Array{Float64,2}, epochs::Int, learning_rate::Float64)
-    for i in 1:epochs
-        # Compute the gradient of the loss function with respect to the weights
-        grad = ForwardDiff.gradient(w -> loss(SimpleNN(nn.inputLayerSize, nn.hiddenLayerSize, nn.outputLayerSize, w[1:size(nn.W1)...], w[(size(nn.W1) + 1):end]...), X, y), vcat(nn.W1[:], nn.W2[:]))
+function mse_loss(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64}, p::Vector{T}) where T<:Number
+    input_dim, hidden_dim, output_dim = nn.input_dim, nn.hidden_dim, nn.output_dim
+    W₁ = reshape(p[1:(input_dim*hidden_dim)], input_dim, hidden_dim)
+    b₁ = p[(input_dim*hidden_dim+1):(input_dim*hidden_dim+hidden_dim)]
+    W₂ = reshape(p[(input_dim*hidden_dim+hidden_dim+1):(input_dim*hidden_dim+hidden_dim+hidden_dim*output_dim)], hidden_dim, output_dim)
+    b₂ = p[(input_dim*hidden_dim+hidden_dim+hidden_dim*output_dim+1):end]
+    
+    nn.W₁, nn.b₁, nn.W₂, nn.b₂ = W₁, b₁, W₂, b₂
+    _, _, ŷ = forward_prop(nn, a₁)
+    return sum((y .- ŷ).^2) / length(y)
+end
+
+# Define the training (backpropagation) process
+function train(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64,2}; n_epochs::Int = 10, η::Float64 = 0.01)
+    for i in 1:n_epochs
+        # Compute the gradient of the loss function with respect to the weights and biases
+        ∇p = ForwardDiff.gradient(mse_loss(nn, a₁, y), [nn.W₁; nn.b₁; nn.W₂; nn.b₂])
 
         # Update the weights using the computed gradient
-        nn.W1 -= reshape(grad[1:length(nn.W1)], size(nn.W1)) * learning_rate
-        nn.W2 -= reshape(grad[(length(nn.W1) + 1):end], size(nn.W2)) * learning_rate
+        nn.W₁ -= reshape(grad[1:length(nn.W1)], size(nn.W1)) * η
+        nn.b₁ -= reshape(grad[(length(nn.W1) + 1):(length(nn.W1) + length(nn.b1))], size(nn.b1)) * η
+        nn.W₂ -= reshape(grad[(length(nn.W1) + 1):end], size(nn.W2)) * η
+        nn.b₂ -= reshape(grad[(length(nn.W1) + 1):(length(nn.W1) + length(nn.b1))], size(nn.b1)) * η
     end
 end
 
-# Now let's initialize our NN and train it
-X = randn(100, 3) # Inputs
-y = randn(100, 1) # Targets
-nn = SimpleNN(3, 5, 1) # Initialize our network
+mlp = initialise_network(2, 5, 1) # Initialize network
+
+nn = mlp
+
+a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, 2))   # Inputs
+y = 2 .+ 3 .* a₁[:,1] .+ 5 .* a₁[:,2]                           # Targets
 
 # Training process
 train(nn, X, y, 1000, 0.01)
