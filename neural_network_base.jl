@@ -42,18 +42,6 @@ function mse_loss(nn::neural_network, a₁::Array{Float64, 2}, y::Array{Float64}
     return sum((y .- ŷ).^2) / length(y)
 end
 
-function mse_loss(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64}, p::Vector{T}) where T<:Number
-    input_dim, hidden_dim, output_dim = nn.input_dim, nn.hidden_dim, nn.output_dim
-    W₁ = reshape(p[1:(input_dim*hidden_dim)], input_dim, hidden_dim)
-    b₁ = p[(input_dim*hidden_dim+1):(input_dim*hidden_dim+hidden_dim)]
-    W₂ = reshape(p[(input_dim*hidden_dim+hidden_dim+1):(input_dim*hidden_dim+hidden_dim+hidden_dim*output_dim)], hidden_dim, output_dim)
-    b₂ = p[(input_dim*hidden_dim+hidden_dim+hidden_dim*output_dim+1):end]
-    
-    nn.W₁, nn.b₁, nn.W₂, nn.b₂ = W₁, b₁, W₂, b₂
-    _, _, ŷ = forward_prop(nn, a₁)
-    return sum((y .- ŷ).^2) / length(y)
-end
-
 # Define the training (backpropagation) process
 function train(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64,2}; n_epochs::Int = 10, η::Float64 = 0.01)
     for i in 1:n_epochs
@@ -61,10 +49,10 @@ function train(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64,2}; 
         ∇p = ForwardDiff.gradient(mse_loss(nn, a₁, y), [nn.W₁; nn.b₁; nn.W₂; nn.b₂])
 
         # Update the weights using the computed gradient
-        nn.W₁ -= reshape(∇p[1:length(nn.W1)], size(nn.W1)) * η
-        nn.b₁ -= reshape(∇p[(length(nn.W1) + 1):(length(nn.W1) + length(nn.b1))], size(nn.b1)) * η
-        nn.W₂ -= reshape(∇p[(length(nn.W1) + 1):end], size(nn.W2)) * η
-        nn.b₂ -= reshape(∇p[(length(nn.W1) + 1):(length(nn.W1) + length(nn.b1))], size(nn.b1)) * η
+        nn.W₁ -= reshape(∇p[begin:length(nn.W₁)], size(nn.W₁)) * η
+        nn.b₁ -= reshape(∇p[(length(nn.W₁) + 1):(length(nn.W₁) + length(nn.b₁))], size(nn.b₁)) * η
+        nn.W₂ -= reshape(∇p[(length(nn.W₁) + length(nn.b₁) + 1):(length(nn.W₁) + length(nn.b₁) + length(nn.W₂))], size(nn.W₂)) * η
+        nn.b₂ -= reshape(∇p[end-length(nn.b₂):end], size(nn.b1)) * η
     end
 end
 
