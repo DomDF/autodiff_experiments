@@ -58,8 +58,6 @@ end
 
 mlp = initialise_network(2, 5, 1) # Initialize network
 
-nn = mlp
-
 a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, 2))   # Inputs
 y = 2 .+ 3 .* a₁[:,1] .+ 5 .* a₁[:,2]                           # Targets
 
