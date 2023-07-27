@@ -61,10 +61,10 @@ function train(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64,2}; 
         ∇p = ForwardDiff.gradient(mse_loss(nn, a₁, y), [nn.W₁; nn.b₁; nn.W₂; nn.b₂])
 
         # Update the weights using the computed gradient
-        nn.W₁ -= reshape(grad[1:length(nn.W1)], size(nn.W1)) * η
-        nn.b₁ -= reshape(grad[(length(nn.W1) + 1):(length(nn.W1) + length(nn.b1))], size(nn.b1)) * η
-        nn.W₂ -= reshape(grad[(length(nn.W1) + 1):end], size(nn.W2)) * η
-        nn.b₂ -= reshape(grad[(length(nn.W1) + 1):(length(nn.W1) + length(nn.b1))], size(nn.b1)) * η
+        nn.W₁ -= reshape(∇p[1:length(nn.W1)], size(nn.W1)) * η
+        nn.b₁ -= reshape(∇p[(length(nn.W1) + 1):(length(nn.W1) + length(nn.b1))], size(nn.b1)) * η
+        nn.W₂ -= reshape(∇p[(length(nn.W1) + 1):end], size(nn.W2)) * η
+        nn.b₂ -= reshape(∇p[(length(nn.W1) + 1):(length(nn.W1) + length(nn.b1))], size(nn.b1)) * η
     end
 end
 
