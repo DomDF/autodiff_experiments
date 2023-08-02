@@ -1,8 +1,8 @@
 using LinearAlgebra, ForwardDiff, ReverseDiff, Zygote   # for backpropagation
-using Random                                            # for randomly initialising the weights and biases
+using Random                                            # for randomly initialising parameters
 using Statistics, DataFrames                            # for storing data
 
-# Define the sigmoid activation function
+# Some activation functions
 function sigmoid_activation(x)
     return 1 / (1 + exp(-x))
 end
@@ -26,17 +26,19 @@ mutable struct neural_network
     b₂::Array{Float64, 1}
 end
 
+# Set up a network with inital weights sampled from a std normal distribution and initial biases set to zero
 function initialise_network(input_size::Int, hidden_size::Int, output_size::Int; prng = MersenneTwister(240819))
     return neural_network(input_size, hidden_size, output_size, 
                           randn(prng, (input_size, hidden_size)), zeros(hidden_size),
                           randn(prng, (hidden_size, output_size)), zeros(output_size))
 end
 
-# Using a mse loss function
+# Using a mean squared error loss function
 function mse(ŷ::Array{Float64}, y::Array{Float64})
     return (y .- ŷ).^2 |> se -> mean(se)
 end
 
+# Make predictions using the current parameters and compute the loss
 function find_loss(nn::neural_network, a₁::Array{Float64}, y::Array{Float64})
     a₂ = [LinearAlgebra.dot(a₁[j, :], nn.W₁[:, i]) .+ nn.b₁[i] for j ∈ 1:size(a₁)[1], i ∈ 1:nn.hidden_dim] |>
         z -> [sigmoid_activation.(z[i, :]) for i ∈ 1:size(z)[1]]
@@ -46,8 +48,6 @@ function find_loss(nn::neural_network, a₁::Array{Float64}, y::Array{Float64})
     
     return mse(ŷ, y), ŷ, a₂
 end
-
-find_loss(mlp, a₁, y)
 
 # Define the training (backpropagation) process
 function train(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64}; n_epochs::Int = 10, η::Float64 = 0.1)
@@ -70,16 +70,17 @@ function train(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64}; n_
     
 end
 
+# Define the function that we want the network to approximate
 function gen_data(a₁::Array{Float64, 2})
     return 2 .+ 3 .* a₁[:,1] .+ 5 .* a₁[:,2]
 end
 
-mlp = initialise_network(2, 5, 1) # Initialize network
-a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, mlp.input_dim))   # Inputs
-y = gen_data(a₁)    # Targets
+# Initialize network and generate inputs (a₁) and targets (y)
+mlp = initialise_network(2, 8, 1) 
+a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, mlp.input_dim)) ; y = gen_data(a₁)    # Targets
 
-trained_net, training_df = train(mlp, a₁, y, n_epochs = 100, η = 0.0001) # Train the network
+# Return the trained network parameters and the loss for each epoch
+trained_net, training_df = train(mlp, a₁, y, n_epochs = 500, η = 0.0001)
 
 using Plots
-
 Plots.plot(training_df.epoch, training_df.loss, xlabel = "Epoch", ylabel = "Loss", label = "Training Loss")
