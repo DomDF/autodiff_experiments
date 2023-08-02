@@ -1,6 +1,6 @@
-using LinearAlgebra, ForwardDiff, ReverseDiff, Zygote   # for backpropagation
-using Random                                            # for randomly initialising parameters
-using Statistics, DataFrames                            # for storing data
+using ForwardDiff, ReverseDiff, Zygote   # for backpropagation
+using LinearAlgebra, Random              # for initialising parameters
+using Statistics, DataFrames             # for storing data
 
 # Some activation functions
 function sigmoid_activation(x)
