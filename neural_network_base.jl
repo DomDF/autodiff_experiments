@@ -1,13 +1,18 @@
 using LinearAlgebra, ForwardDiff, ReverseDiff, Zygote   # for backpropagation
 using Random                                            # for randomly initialising the weights and biases
+using Statistics, DataFrames                            # for storing data
 
 # Define the sigmoid activation function
 function sigmoid_activation(x)
-    return 1 / (1 + ℯ^(-x))
+    return 1 / (1 + exp(-x))
 end
 
 function relu_activation(x)
     return max(zero(T), x)
+end
+
+function linear_activation(x)
+    return x
 end
 
 # Define the structure of our neural network
@@ -27,39 +32,54 @@ function initialise_network(input_size::Int, hidden_size::Int, output_size::Int;
                           randn(prng, (hidden_size, output_size)), zeros(output_size))
 end
 
-# Define forward propagation process
-function forward_prop(nn::neural_network, a₁::Array{Float64,2})
-    a₂ = [reshape(a₁[i, :], (1, nn.input_dim)) * nn.W₁ .+ reshape(nn.b₁, (1, nn.hidden_dim)) for i ∈ 1:size(a₁)[1]] |> 
-        z -> [sigmoid_activation.(z[i]) for i ∈ 1:length(z)]
-    ŷ = [a₂[i] * nn.W₂ .+ reshape(nn.b₂, (1, nn.output_dim)) for i ∈ 1:size(a₂)[1]] |>
-        z -> [sigmoid_activation.(z[i])[1] for i ∈ 1:length(z)]
-    return a₁, a₂, ŷ
+# Using a mse loss function
+function mse(ŷ::Array{Float64}, y::Array{Float64})
+    return (y .- ŷ).^2 |> se -> mean(se)
 end
 
-# Using a mse loss function
-function mse_loss(nn::neural_network, a₁::Array{Float64, 2}, y::Array{Float64})
-    _, _, ŷ = forward_prop(nn, a₁)
-    return sum((y .- ŷ).^2) / length(y)
+function find_loss(nn::neural_network, a₁::Array{Float64}, y::Array{Float64})
+    a₂ = [LinearAlgebra.dot(a₁[j, :], nn.W₁[:, i]) .+ nn.b₁[i] for j ∈ 1:size(a₁)[1], i ∈ 1:nn.hidden_dim] |>
+        z -> [sigmoid_activation.(z[i, :]) for i ∈ 1:size(z)[1]]
+    
+    ŷ = [LinearAlgebra.dot(a₂[j], nn.W₂) .+ nn.b₂ for j ∈ 1:size(a₂)[1]] |>
+        z -> [linear_activation(z[i][1]) for i ∈ 1:length(z)]
+    
+    return mse(ŷ, y), ŷ, a₂
 end
+
+find_loss(mlp, a₁, y)
 
 # Define the training (backpropagation) process
-function train(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64,2}; n_epochs::Int = 10, η::Float64 = 0.01)
-    for i in 1:n_epochs
-        # Compute the gradient of the loss function with respect to the weights and biases
-        ∇p = ForwardDiff.gradient(mse_loss(nn, a₁, y), [nn.W₁; nn.b₁; nn.W₂; nn.b₂])
+function train(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64}; n_epochs::Int = 10, η::Float64 = 0.1)
+    
+    training_df = DataFrame(epoch = Int[], loss = Float64[])
 
-        # Update the weights using the computed gradient
-        nn.W₁ -= reshape(∇p[begin:length(nn.W₁)], size(nn.W₁)) * η
-        nn.b₁ -= reshape(∇p[(length(nn.W₁) + 1):(length(nn.W₁) + length(nn.b₁))], size(nn.b₁)) * η
-        nn.W₂ -= reshape(∇p[(length(nn.W₁) + length(nn.b₁) + 1):(length(nn.W₁) + length(nn.b₁) + length(nn.W₂))], size(nn.W₂)) * η
-        nn.b₂ -= reshape(∇p[end-length(nn.b₂):end], size(nn.b1)) * η
+    for i in 1:n_epochs
+        # Compute the gradient of the loss function with respect to the paramneters of the network
+        ∇p = Zygote.gradient(p -> find_loss(p, a₁, y)[1], nn)[1]
+
+        # Update the weights using the computed gradient, ∇p (direction) and the learning rate, η (magnitude)
+        nn.W₁ -= ∇p.W₁ .* η; nn.b₁ -= ∇p.b₁ .* η
+        nn.W₂ -= ∇p.W₂ .* η; nn.b₂ -= ∇p.b₂ .* η
+
+        # Store the loss for each epoch
+        append!(training_df, DataFrame(epoch = i, loss = find_loss(nn, a₁, y)[1]))
     end
+
+    return (nn, training_df)
+    
+end
+
+function gen_data(a₁::Array{Float64, 2})
+    return 2 .+ 3 .* a₁[:,1] .+ 5 .* a₁[:,2]
 end
 
 mlp = initialise_network(2, 5, 1) # Initialize network
+a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, mlp.input_dim))   # Inputs
+y = gen_data(a₁)    # Targets
 
-a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, 2))   # Inputs
-y = 2 .+ 3 .* a₁[:,1] .+ 5 .* a₁[:,2]                           # Targets
+trained_net, training_df = train(mlp, a₁, y, n_epochs = 100, η = 0.0001) # Train the network
 
-# Training process
-train(nn, a₁, y)
+using Plots
+
+Plots.plot(training_df.epoch, training_df.loss, xlabel = "Epoch", ylabel = "Loss", label = "Training Loss")
