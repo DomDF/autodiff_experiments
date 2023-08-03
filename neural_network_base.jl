@@ -53,7 +53,6 @@ end
 function train(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64}; n_epochs::Int = 10, η::Float64 = 0.1)
     
     training_df = DataFrame(epoch = Int[], loss = Float64[])
-
     for i in 1:n_epochs
         # Compute the gradient of the loss function with respect to the paramneters of the network
         ∇p = Zygote.gradient(p -> find_loss(p, a₁, y)[1], nn)[1]
@@ -66,8 +65,7 @@ function train(nn::neural_network, a₁::Array{Float64,2}, y::Array{Float64}; n_
         append!(training_df, DataFrame(epoch = i, loss = find_loss(nn, a₁, y)[1]))
     end
 
-    return (nn, training_df)
-    
+    return nn, training_df
 end
 
 # Define the function that we want the network to approximate
@@ -83,8 +81,7 @@ a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, mlp.input_dim)); y =
 trained_net, training_df = train(mlp, a₁, y, n_epochs = 500, η = 0.0001)
 
 using Plots
-Plots.plot(training_df.epoch, training_df.loss, 
-           xlabel = "Epoch", ylabel = "mse", label = "Training Loss",
-           fontfamily = "Atkinson Hyperlegible")
+Plots.plot(log10.(training_df.epoch), log10.(training_df.loss), 
+           xlabel = "Log₁₀(epoch)", ylabel = "Log₁₀(mse)", label = "Training Loss")
 
 savefig("loss_plot.png")
