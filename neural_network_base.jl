@@ -81,7 +81,7 @@ a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, mlp.input_dim)); y =
 trained_net, training_df = train(mlp, a₁, y, n_epochs = 500, η = 0.0001)
 
 using Plots
-Plots.plot(log10.(training_df.epoch), log10.(training_df.loss), 
-           xlabel = "Log₁₀(epoch)", ylabel = "Log₁₀(mse)", label = "Training Loss")
+Plots.plot(training_df.epoch, log10.(training_df.loss), 
+           xlabel = "Epoch", ylabel = "Log₁₀(mse)", label = "Training Loss")
 
 savefig("loss_plot.png")
