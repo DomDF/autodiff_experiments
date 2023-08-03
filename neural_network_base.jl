@@ -77,10 +77,14 @@ end
 
 # Initialize network and generate inputs (a₁) and targets (y)
 mlp = initialise_network(2, 8, 1) 
-a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, mlp.input_dim)) ; y = gen_data(a₁)    # Targets
+a₁ = MersenneTwister(240819) |> prng -> randn(prng, (100, mlp.input_dim)); y = gen_data(a₁)
 
 # Return the trained network parameters and the loss for each epoch
 trained_net, training_df = train(mlp, a₁, y, n_epochs = 500, η = 0.0001)
 
 using Plots
-Plots.plot(training_df.epoch, training_df.loss, xlabel = "Epoch", ylabel = "Loss", label = "Training Loss")
+Plots.plot(training_df.epoch, training_df.loss, 
+           xlabel = "Epoch", ylabel = "mse", label = "Training Loss",
+           fontfamily = "Atkinson Hyperlegible")
+
+savefig("loss_plot.png")
