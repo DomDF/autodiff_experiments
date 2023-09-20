@@ -136,20 +136,6 @@ function forward_propagation(nn::neural_network, nn_funs::neural_network_funs, a
     return vcat([a], forward_propagation(nn, nn_funs, next_a, layer_idx + 1))
 end
 
-#=
-function forward_prop(nn::neural_network, nn_funs::neural_network_funs, a)
-    act_h = activations_dict[nn_funs.hidden_activation]
-    act_o = activations_dict[nn_funs.output_activation]
-
-    output = act_h.(a * nn.Ws[1] .+ nn.bs[1]') |>
-        o -> act_h.(o * nn.Ws[2] .+ nn.bs[2]') |>
-        o -> [(o * nn.Ws[3] .+ nn.bs[3]')[j, :] |> 
-                x -> act_o(x)[1] for j in 1:(size(o)[1])]
-
-    return output
-end
-=#
-
 function find_loss(nn::neural_network, nn_funs::neural_network_funs, a::Array{Float64}, y::Array{Float64})
 
     loss_fn = loss_dict[nn_funs.loss]
