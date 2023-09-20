@@ -28,9 +28,11 @@ function linear_activation(x)
     return x
 end
 
-function softmax_activation(x::Vector)
-    return exp.(x) ./ sum(exp.(x))
+function softmax_activation(x)
+    exp_x = exp.(x)
+    return exp_x ./ sum(exp_x, dims = 1)
 end
+
 
 activations_dict = Dict(
     "sigmoid" => sigmoid_activation,
@@ -45,17 +47,17 @@ activations_dict = Dict(
 #
 ################################################################
 
-function mse_loss(ŷ::Array{Float64}, y::Array{Float64})
-    return (y .- ŷ).^2 |> mean
+function mse_loss(y_true::Array{Float64}, y_pred::Array{Float64})
+    return (y_true .- y_pred).^2 |> mean
 end
 
-function cross_entropy_loss(y_true::Vector, y_pred::Vector)
+function cross_entropy_loss(y_true::Array{Float64}, y_pred::Array{Float64})
     # Ensure numerical stability by avoiding taking the log of 0 or 1
     ϵ = 10^-12
-    clipped_preds = clamp.(y_pred, ϵ, 1 - ϵ)
+    clipped_preds = [clamp.(y_pred[i, :], ϵ, 1 - ϵ) for i ∈ 1:(size(y_pred)[1])]
     
     # ℒ(y, ŷ) = -Σ[yᵢ × log(ŷᵢ)]
-    return -sum(y_true .* log.(clipped_preds))
+    return -sum([y_true[i, :] .* log.(clipped_preds[i]) for i ∈ 1:(size(y_true)[1])] |> x -> reduce(vcat, x))
 end
 
 loss_dict = Dict(
@@ -77,17 +79,31 @@ mutable struct neural_network
     bs::Vector{Array{Float64, 1}}
 end
 
-function initialise_network(input_size::Int, hidden_sizes::Vector{Int}, output_size::Int; prng=MersenneTwister(240819))
-    Ws = []; bs = []
+struct neural_network_funs
+    hidden_activation::String
+    output_activation::String
+    loss::String
+end
 
-    network_dims = [input_size; hidden_sizes; output_size]
+function initialise_network(input_size::Int, hidden_sizes::Vector{Int}, output_size::Int;
+                            hidden_activation::String = "sigmoid", 
+                            output_activation::String = "linear",
+                            loss::String = "mse",
+                            prng = MersenneTwister(240819))
+    @assert hidden_activation ∈ keys(activations_dict) "hidden_activation must be one of $(keys(activations_dict))"
+    @assert output_activation ∈ keys(activations_dict) "output_activation must be one of $(keys(activations_dict))"
+    @assert loss ∈ keys(loss_dict) "loss must be one of $(keys(loss_dict))"
+
+    Ws = []; bs = []; network_dims = [input_size; hidden_sizes; output_size]
 
     for i = 1:length(network_dims)-1
         push!(Ws, randn(prng, network_dims[i], network_dims[i+1]))
         push!(bs, zeros(network_dims[i+1]))
     end
 
-    return neural_network(input_size, hidden_sizes, output_size, Ws, bs)
+    return neural_network(input_size, hidden_sizes, output_size, Ws, bs), 
+           neural_network_funs(hidden_activation, output_activation, loss)
+
 end
 
 ################################################################
@@ -96,40 +112,50 @@ end
 #
 ################################################################
 
-function forward_prop(nn::neural_network, a, layer_idx = 1; 
-                      hidden_activation::String = "sigmoid", output_activation::String = "linear")
-    @assert layer_idx > 0 "layer_idx must be greater than 0"
-    @assert hidden_activation ∈ keys(activations_dict) "hidden_activation must be one of $(keys(activations_dict))"
-    @assert output_activation ∈ keys(activations_dict) "output_activation must be one of $(keys(activations_dict))"
+function forward_propagation(nn::neural_network, nn_funs::neural_network_funs, a, layer_idx::Int64 = 1)
 
-    # check for the last layer
     if layer_idx > length(nn.Ws)
         return [a]
     end
 
-    act_h = activations_dict[hidden_activation]; act_o = activations_dict[output_activation]
+    act_h = activations_dict[nn_funs.hidden_activation]; act_o = activations_dict[nn_funs.output_activation]
 
     if layer_idx == length(nn.Ws)
         # use a linear activation function for the last layer
-        next_a = act_o.(a * nn.Ws[layer_idx] .+ nn.bs[layer_idx]')
+        if act_o == softmax_activation
+            next_a = act_o(a * nn.Ws[layer_idx] .+ nn.bs[layer_idx]')
+        else
+            next_a = act_o.(a * nn.Ws[layer_idx] .+ nn.bs[layer_idx]')
+        end
     else
         # otherwise use a sigmoid activation function
         next_a = act_h.(a * nn.Ws[layer_idx] .+ nn.bs[layer_idx]')
     end
 
     # recursively find all the outputs and concatenate them
-    return vcat([a], forward_prop(nn, next_a, layer_idx + 1))
+    return vcat([a], forward_propagation(nn, nn_funs, next_a, layer_idx + 1))
 end
 
-function find_loss(nn::neural_network, a::Array{Float64}, y::Array{Float64};
-                   loss::String = "mse")
-    @assert loss ∈ keys(loss_dict) "loss must be one of $(keys(loss_dict))"
+#=
+function forward_prop(nn::neural_network, nn_funs::neural_network_funs, a)
+    act_h = activations_dict[nn_funs.hidden_activation]
+    act_o = activations_dict[nn_funs.output_activation]
 
-    loss_fn = loss_dict[loss]
+    output = act_h.(a * nn.Ws[1] .+ nn.bs[1]') |>
+        o -> act_h.(o * nn.Ws[2] .+ nn.bs[2]') |>
+        o -> [(o * nn.Ws[3] .+ nn.bs[3]')[j, :] |> 
+                x -> act_o(x)[1] for j in 1:(size(o)[1])]
 
-    activations = forward_prop(nn, a); ŷ = activations[end]
+    return output
+end
+=#
 
-    return loss_fn(ŷ, y), ŷ, activations
+function find_loss(nn::neural_network, nn_funs::neural_network_funs, a::Array{Float64}, y::Array{Float64})
+
+    loss_fn = loss_dict[nn_funs.loss]
+    ŷ = forward_propagation(nn, nn_funs, a)[end]
+
+    return loss_fn(y, ŷ), ŷ
 end
 
 ################################################################
@@ -138,9 +164,9 @@ end
 #
 ################################################################
 
-function train(nn::neural_network, a::Array{Float64}, y::Array{Float64};
+function train(nn::neural_network, nn_funs::neural_network_funs, 
+               a::Array{Float64}, y::Array{Float64};
                a_test::Array{Float64} = a, y_test::Array{Float64} = y, 
-               loss::String = "mse",
                n_epochs::Int = 10, ηᵢ::Float64 = 0.1, scheduler::Bool = false)
     @assert n_epochs > 0 "n_epochs must be greater than 0"
 
@@ -153,8 +179,8 @@ function train(nn::neural_network, a::Array{Float64}, y::Array{Float64};
         else
             η = ηᵢ
         end
-        
-        ∇p = Zygote.gradient(p -> find_loss(p, a, y, loss = loss)[1], nn)[1]
+
+        ∇p = Zygote.gradient(p -> find_loss(p, nn_funs, a, y)[1], nn)[1]
         
         for j = 1:length(nn.Ws)
             nn.Ws[j] -= η * ∇p.Ws[j]
@@ -163,8 +189,14 @@ function train(nn::neural_network, a::Array{Float64}, y::Array{Float64};
         
         append!(training_df, 
                 DataFrame(epoch = i, 
-                          loss = find_loss(nn, a, y)[1],
-                          test_loss = find_loss(nn, a_test, y_test)[1]))
+                          loss = find_loss(nn, nn_funs, a, y)[1],
+                          test_loss = find_loss(nn, nn_funs, a_test, y_test)[1]))
+
+
+        if n_epochs % i == 0
+            println("Epoch: $i, Progress: $(100 * i / n_epochs), %")
+        end
+
     end
     
     return nn, training_df
