@@ -4,7 +4,7 @@
 #
 ################################################################
 
-using Zygote                            # for differentiating loss function
+using Enzyme                            # for differentiating loss function
 using LinearAlgebra, Random             # for initialising parameters
 using Statistics, DataFrames            # for storing data
 
@@ -33,14 +33,6 @@ function softmax_activation(x)
     return exp_x ./ sum(exp_x, dims = 1)
 end
 
-
-activations_dict = Dict(
-    "sigmoid" => sigmoid_activation,
-    "relu" => relu_activation,
-    "linear" => linear_activation,
-    "softmax" => softmax_activation
-)
-
 ################################################################
 #
 # Defining loss functions
@@ -53,21 +45,17 @@ end
 
 function cross_entropy_loss(y_true::Array{Float64}, y_pred::Array{Float64})
     # Ensure numerical stability by avoiding taking the log of 0 or 1
-    ϵ = 10^-12
+    ϵ = 1e-12
     clipped_preds = [clamp.(y_pred[i, :], ϵ, 1 - ϵ) for i ∈ 1:(size(y_pred)[1])]
     
-    # ℒ(y, ŷ) = -Σ[yᵢ × log(ŷᵢ)]
-    return -sum([y_true[i, :] .* log.(clipped_preds[i]) for i ∈ 1:(size(y_true)[1])] |> x -> reduce(vcat, x))
+    # ℒ(y, ŷ) = -Σ[yᵢ × log(ŷᵢ)] / N  (now properly averaged)
+    total_loss = -sum([y_true[i, :] .* log.(clipped_preds[i]) for i ∈ 1:(size(y_true)[1])] |> x -> reduce(vcat, x))
+    return total_loss / size(y_true, 1)  # Average over batch size
 end
-
-loss_dict = Dict(
-    "mse" => mse_loss,
-    "cross_entropy" => cross_entropy_loss
-)
 
 ################################################################
 #
-# Functions to initialise a neural network
+# Neural network structures
 #
 ################################################################
 
@@ -80,10 +68,28 @@ mutable struct neural_network
 end
 
 struct neural_network_funs
-    hidden_activation::String
-    output_activation::String
-    loss::String
+    hidden_activation::Function
+    output_activation::Function
+    loss::Function
 end
+
+################################################################
+#
+# Functions to initialise a neural network
+#
+################################################################
+
+activations_dict = Dict(
+    "sigmoid" => sigmoid_activation,
+    "relu" => relu_activation,
+    "linear" => linear_activation,
+    "softmax" => softmax_activation
+)
+
+loss_dict = Dict(
+    "mse" => mse_loss,
+    "cross_entropy" => cross_entropy_loss
+)
 
 function initialise_network(input_size::Int, hidden_sizes::Vector{Int}, output_size::Int;
                             hidden_activation::String = "sigmoid", 
@@ -101,9 +107,13 @@ function initialise_network(input_size::Int, hidden_sizes::Vector{Int}, output_s
         push!(bs, zeros(network_dims[i+1]))
     end
 
-    return neural_network(input_size, hidden_sizes, output_size, Ws, bs), 
-           neural_network_funs(hidden_activation, output_activation, loss)
+    # Store actual functions instead of strings
+    hidden_act_fn = activations_dict[hidden_activation]
+    output_act_fn = activations_dict[output_activation]
+    loss_fn = loss_dict[loss]
 
+    return neural_network(input_size, hidden_sizes, output_size, Ws, bs), 
+           neural_network_funs(hidden_act_fn, output_act_fn, loss_fn)
 end
 
 ################################################################
@@ -113,22 +123,23 @@ end
 ################################################################
 
 function forward_propagation(nn::neural_network, nn_funs::neural_network_funs, a, layer_idx::Int64 = 1)
-
     if layer_idx > length(nn.Ws)
         return [a]
     end
 
-    act_h = activations_dict[nn_funs.hidden_activation]; act_o = activations_dict[nn_funs.output_activation]
+    # Use function pointers directly
+    act_h = nn_funs.hidden_activation
+    act_o = nn_funs.output_activation
 
     if layer_idx == length(nn.Ws)
-        # use a linear activation function for the last layer
+        # Output layer
         if act_o == softmax_activation
             next_a = act_o(a * nn.Ws[layer_idx] .+ nn.bs[layer_idx]')
         else
             next_a = act_o.(a * nn.Ws[layer_idx] .+ nn.bs[layer_idx]')
         end
     else
-        # otherwise use a sigmoid activation function
+        # Hidden layer
         next_a = act_h.(a * nn.Ws[layer_idx] .+ nn.bs[layer_idx]')
     end
 
@@ -137,16 +148,13 @@ function forward_propagation(nn::neural_network, nn_funs::neural_network_funs, a
 end
 
 function find_loss(nn::neural_network, nn_funs::neural_network_funs, a::Array{Float64}, y::Array{Float64})
-
-    loss_fn = loss_dict[nn_funs.loss]
     ŷ = forward_propagation(nn, nn_funs, a)[end]
-
-    return loss_fn(y, ŷ), ŷ
+    return nn_funs.loss(y, ŷ), ŷ
 end
 
 ################################################################
 #
-# Training (back propagation and updating parameters)
+# Training with Enzyme autodiff
 #
 ################################################################
 
@@ -159,30 +167,41 @@ function train(nn::neural_network, nn_funs::neural_network_funs,
     training_df = DataFrame(epoch = Int[], loss = Float64[], test_loss = Float64[])
 
     for i in 1:n_epochs
-
         if scheduler
             η = ηᵢ * (0.5 ^ (i ÷ (n_epochs / 5)))
         else
             η = ηᵢ
         end
 
-        ∇p = Zygote.gradient(p -> find_loss(p, nn_funs, a, y)[1], nn)[1]
-        
+        # create shadow network using Enzyme.make_zero
+        ∇nn = Enzyme.make_zero(nn)
+
+        # Use Enzyme autodiff with find_loss directly (runtime activity for broadcasting)
+        Enzyme.autodiff(
+            set_runtime_activity(Reverse),
+            (net, funs, inputs, targets) -> find_loss(net, funs, inputs, targets)[1],
+            Active, # the return value for the function is active (the loss)
+            Duplicated(nn, ∇nn), # the order of arguments here must match the function signature
+            Const(nn_funs),
+            Const(a),
+            Const(y)
+            # Enzyme requires explicit annotations for: the return value and very single argument
+        )
+       
         for j = 1:length(nn.Ws)
-            nn.Ws[j] -= η * ∇p.Ws[j]
-            nn.bs[j] -= η * ∇p.bs[j]
+            nn.Ws[j] -= η * ∇nn.Ws[j]
+            nn.bs[j] -= η * ∇nn.bs[j]
         end
         
+        # Record losses
         append!(training_df, 
                 DataFrame(epoch = i, 
                           loss = find_loss(nn, nn_funs, a, y)[1],
                           test_loss = find_loss(nn, nn_funs, a_test, y_test)[1]))
 
-
         if n_epochs % i == 0
             println("Epoch: $i, Progress: $(100 * i / n_epochs), %")
         end
-
     end
     
     return nn, training_df
@@ -211,3 +230,8 @@ function one_hot_encode(y::Vector)
     
     return encoded_y
 end
+
+DataFrame(x = 1:1_000) |>
+    df -> @rtransform(df, :η = 0.01 * (0.9 ^ (:x ÷ 20))) |>
+    df -> plot(df.x, log.(df.η), xlabel = "epoch", ylabel = "ln η")
+
